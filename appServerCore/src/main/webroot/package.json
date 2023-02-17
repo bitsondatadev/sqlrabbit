@@ -1,0 +1,21 @@
+{
+  "name": "SQLRabbit",
+  "author": "Brian Olsen <bits@bitsondatadev>",
+  "repository": "https://github.com/bitsondatadev/sqlrabbit",
+  "license": "Apache 2.0",
+  "version": "0.0.1",
+  "devDependencies": {
+    "almond": "0.3.0",
+    "requirejs-text": "2.0.12",
+    "sql.js": "0.4.0",
+    "jquery": "1.12.4",
+    "block-ui": "2.70.1",
+    "jquery.cookie": "1.4.1",
+    "backbone": "1.1.2",
+    "lodash": "3.9.3",
+    "handlebars": "2.0.0",
+    "codemirror": "5.27.4",
+    "blueimp-md5": "1.1.0",
+    "swagger-ui-dist": "3.5.0"
+  }
+}

@@ -1,0 +1,189 @@
+{{ if .Values.nfsServerIp }}
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: appserver-src
+spec:
+  capacity:
+    storage: 15Gi
+  accessModes:
+  - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: standard
+  nfs:
+    server: {{ .Values.nfsServerIp }}
+    path: {{ .Values.nfsPath }}
+---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: appserver-src-claim
+spec:
+  storageClassName: standard
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 15Gi
+---
+{{ end }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: root-cluster-admin-binding
+  resourceVersion: "2720316"
+  selfLink: /apis/rbac.authorization.k8s.io/v1/clusterrolebindings/root-cluster-admin-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+- apiGroup: rbac.authorization.k8s.io
+  kind: User
+  name: system:serviceaccount:sqlrabbit:default
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: sqlrabbit
+  name: appservers
+spec:
+  selector:
+    matchLabels:
+      role: appserver
+  replicas: {{ .Values.appServerReplicas }}
+  template:
+    metadata:
+      labels:
+        role: appserver
+    spec:
+    {{ if .Values.appDatabaseIP }}{{else}}
+      initContainers:
+      - name: wait-for-repo
+        image: "groundnuty/k8s-wait-for:0.3"
+        imagePullPolicy: IfNotPresent
+        args: [ "pod", "-l", "role=appdatabase" ]
+    {{ end }}
+      volumes:
+      - name: healthcheck
+        emptyDir:
+          medium: Memory
+    {{ if .Values.nfsServerIp }}
+      - name: nfs-storage
+        persistentVolumeClaim:
+          claimName: appserver-src-claim
+    {{ end }}
+      containers:
+        - image: {{ .Values.registryPrefix }}/{{ .Values.appServerImage }}:{{ .Values.appServerVersion }}
+          volumeMounts:
+            - mountPath: /healthcheck
+              name: healthcheck
+        {{ if .Values.nfsServerIp }}
+            - mountPath: "/tmp/src"
+              name: nfs-storage
+        {{ end }}
+          imagePullPolicy: Always
+          name: appserver
+          ports:
+            - containerPort: 8081
+              name: http
+              protocol: TCP
+          resources:
+              requests:
+                memory: {{ .Values.appServerMemory | quote }}
+          env:
+        {{ if .Values.nfsServerIp }}
+            - name: VERTX_OPTS
+              value: "-XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/tmp -Xmx960m -Xdebug -Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=5005 -Dvertx.disableFileCaching=true -Dvertx.disableFileCPResolving=true"
+            - name: MODE
+              value: "DEVELOPMENT"
+        {{ else }}
+            - name: VERTX_OPTS
+              value: "-XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/tmp -Xmx960m -Xdebug -Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=5005"
+        {{ end }}
+          readinessProbe:
+            httpGet:
+              path: /backend/dbTypes
+              port: 8081
+            initialDelaySeconds: 5
+            timeoutSeconds: 2
+            periodSeconds: 20
+          livenessProbe:
+            exec:
+              command:
+              - cat
+              - /healthcheck/healthy
+            initialDelaySeconds: 5
+            periodSeconds: 5
+        - image: {{ .Values.registryPrefix }}/varnish:{{ .Values.varnishVersion }}
+          volumeMounts:
+            - mountPath: /healthcheck
+              name: healthcheck
+          imagePullPolicy: IfNotPresent
+          name: varnish
+          ports:
+            - containerPort: 8080
+              name: http
+              protocol: TCP
+          env:
+          - name: VARNISH_BACKEND_HOST
+            value: "localhost"
+          - name: VARNISH_BACKEND_PORT
+            value: "8081"
+          resources:
+              requests:
+                memory: "128Mi"
+          livenessProbe:
+            exec:
+              command:
+              - cat
+              - /healthcheck/healthy
+            initialDelaySeconds: 5
+            periodSeconds: 5
+        # thanks to https://stackoverflow.com/a/41965920/808921
+        - name: liveness
+          args:
+          - /bin/sh
+          - -c
+          - touch /healthcheck/healthy; sleep $(( RANDOM % (3600) + 1800 )); rm -rf /healthcheck/healthy; sleep 600
+          image: gcr.io/google_containers/busybox
+          volumeMounts:
+            - mountPath: /healthcheck
+              name: healthcheck
+          livenessProbe:
+            exec:
+              command:
+              - cat
+              - /healthcheck/healthy
+            initialDelaySeconds: 5
+            periodSeconds: 5
+---
+kind: Service
+apiVersion: v1
+metadata:
+  namespace: sqlrabbit
+  name: appserver-service
+spec:
+{{ if .Values.isLocal }}{{ else }}
+  type: LoadBalancer
+{{ end }}
+  ports:
+    - port: 80
+      name: http
+      targetPort: 8080
+  selector:
+    role: appserver
+{{ if .Values.isLocal }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  namespace: sqlrabbit
+  name: ingress
+spec:
+  defaultBackend:
+    service: 
+      name: appserver-service
+      port:
+        number: 80
+{{ end }}

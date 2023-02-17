@@ -1,0 +1,45 @@
+{{ if .Values.appDatabaseIP }}
+kind: Service
+apiVersion: v1
+metadata:
+  namespace: sqlrabbit
+  name: appdatabase
+spec:
+  type: ExternalName
+  externalName: {{ .Values.appDatabaseIP }}
+{{ else }}
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: sqlrabbit
+  name: appdatabase
+  labels:
+    role: appdatabase
+spec:
+  containers:
+    - image: {{ .Values.registryPrefix }}/appdatabase:latest
+      imagePullPolicy: Always
+      name: appdatabase
+      ports:
+        - containerPort: 5432
+          protocol: TCP
+      readinessProbe:
+        exec:
+          command:
+            - "/ready.sh"
+        initialDelaySeconds: 5
+        timeoutSeconds: 5
+        periodSeconds: 10
+---
+kind: Service
+apiVersion: v1
+metadata:
+  namespace: sqlrabbit
+  name: appdatabase
+spec:
+  ports:
+    - port: 5432
+      targetPort: 5432
+  selector:
+    role: appdatabase
+{{ end }}

@@ -1,0 +1,13 @@
+
+# login with aws ecr get-login-password | docker login --username AWS --password-stdin $EXTERNAL_REGISTRY
+
+appServerReplicas: 2
+appServerMemory: 1024Mi
+appServerImage: appservercore
+#isLocal: false
+isLocal: true 
+registryPrefix: 
+#appDatabaseIP: 
+appServerVersion: latest
+varnishVersion: latest
+
